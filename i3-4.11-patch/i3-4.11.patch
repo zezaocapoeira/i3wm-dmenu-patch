@@ -1,0 +1,1609 @@
+diff -rupN i3-4.11-original/common.mk i3-4.11-patched/common.mk
+--- i3-4.11-original/common.mk	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/common.mk	2015-10-11 13:51:17.076958947 -0300
+@@ -1,6 +1,7 @@
+ UNAME=$(shell uname)
+ DEBUG=1
+ INSTALL=install
++USE_ICONS=1
+ LN=ln
+ PKG_CONFIG=pkg-config
+ ifndef PREFIX
+@@ -59,7 +60,9 @@ I3_CPPFLAGS += -DMINOR_VERSION=${MINOR_V
+ I3_CPPFLAGS += -DPATCH_VERSION=${PATCH_VERSION}
+ I3_CPPFLAGS += -DSYSCONFDIR=\"${SYSCONFDIR}\"
+ I3_CPPFLAGS += -DI3__FILE__=__FILE__
+-
++ifeq ($(USE_ICONS),1)
++I3_CPPFLAGS += -DUSE_ICONS
++endif
+ 
+ ## Libraries flags
+ 
+@@ -108,7 +111,9 @@ XCB_WM_CFLAGS += $(call cflags_for_lib,
+ XCB_WM_LIBS   := $(call ldflags_for_lib, xcb-icccm,xcb-icccm)
+ XCB_WM_LIBS   += $(call ldflags_for_lib, xcb-xinerama,xcb-xinerama)
+ XCB_WM_LIBS   += $(call ldflags_for_lib, xcb-randr,xcb-randr)
+-
++ifeq ($(USE_ICONS),1)
++XCB_WM_LIBS   += $(call ldflags_for_lib, xcb-image,xcb-image)
++endif
+ XKB_COMMON_CFLAGS := $(call cflags_for_lib, xkbcommon,xkbcommon)
+ XKB_COMMON_LIBS := $(call ldflags_for_lib, xkbcommon,xkbcommon)
+ XKB_COMMON_X11_CFLAGS := $(call cflags_for_lib, xkbcommon-x11,xkbcommon-x11)
+diff -rupN i3-4.11-original/i3bar/include/common.h i3-4.11-patched/i3bar/include/common.h
+--- i3-4.11-original/i3bar/include/common.h	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/i3bar/include/common.h	2015-10-11 13:51:17.077958947 -0300
+@@ -38,6 +38,8 @@ struct status_block {
+     i3String *short_text;
+ 
+     char *color;
++    char *background;
++    char *border;
+ 
+     /* min_width can be specified either as a numeric value (in pixels) or as a
+      * string. For strings, we set min_width to the measured text width of
+@@ -49,6 +51,10 @@ struct status_block {
+ 
+     bool urgent;
+     bool no_separator;
++    uint32_t border_top;
++    uint32_t border_right;
++    uint32_t border_bottom;
++    uint32_t border_left;
+     bool is_markup;
+ 
+     /* The amount of pixels necessary to render a separater after the block. */
+diff -rupN i3-4.11-original/i3bar/include/config.h i3-4.11-patched/i3bar/include/config.h
+--- i3-4.11-original/i3bar/include/config.h	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/i3bar/include/config.h	2015-10-11 13:51:17.077958947 -0300
+@@ -34,6 +34,7 @@ typedef struct config_t {
+     TAILQ_HEAD(bindings_head, binding_t) bindings;
+     position_t position;
+     int verbose;
++    uint32_t bar_height;
+     struct xcb_color_strings_t colors;
+     bool disable_binding_mode_indicator;
+     bool disable_ws;
+diff -rupN i3-4.11-original/i3bar/src/child.c i3-4.11-patched/i3bar/src/child.c
+--- i3-4.11-original/i3bar/src/child.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/i3bar/src/child.c	2015-10-11 13:51:17.077958947 -0300
+@@ -75,6 +75,8 @@ static void clear_statusline(struct stat
+             FREE(first->name);
+             FREE(first->instance);
+             FREE(first->min_width_str);
++            FREE(first->background);
++            FREE(first->border);
+         }
+ 
+         TAILQ_REMOVE(head, first, blocks);
+@@ -167,6 +169,12 @@ static int stdin_start_map(void *context
+     else
+         ctx->block.sep_block_width = logical_px(8) + separator_symbol_width;
+ 
++    /* If a border is set, by default we draw all four borders. */
++    ctx->block.border_top = 1;
++    ctx->block.border_right = 1;
++    ctx->block.border_bottom = 1;
++    ctx->block.border_left = 1;
++
+     return 1;
+ }
+ 
+@@ -205,6 +213,12 @@ static int stdin_string(void *context, c
+         sasprintf(&(ctx->block.color), "%.*s", len, val);
+         return 1;
+     }
++    if (strcasecmp(ctx->last_map_key, "background") == 0) {
++        sasprintf(&(ctx->block.background), "%.*s", len, val);
++    }
++    if (strcasecmp(ctx->last_map_key, "border") == 0) {
++        sasprintf(&(ctx->block.border), "%.*s", len, val);
++    }
+     if (strcasecmp(ctx->last_map_key, "markup") == 0) {
+         ctx->block.is_markup = (len == strlen("pango") && !strncasecmp((const char *)val, "pango", strlen("pango")));
+         return 1;
+@@ -254,6 +268,22 @@ static int stdin_integer(void *context,
+         ctx->block.sep_block_width = (uint32_t)val;
+         return 1;
+     }
++    if (strcasecmp(ctx->last_map_key, "border_top") == 0) {
++        ctx->block.border_top = (uint32_t)val;
++        return 1;
++    }
++    if (strcasecmp(ctx->last_map_key, "border_right") == 0) {
++        ctx->block.border_right = (uint32_t)val;
++        return 1;
++    }
++    if (strcasecmp(ctx->last_map_key, "border_bottom") == 0) {
++        ctx->block.border_bottom = (uint32_t)val;
++        return 1;
++    }
++    if (strcasecmp(ctx->last_map_key, "border_left") == 0) {
++        ctx->block.border_left = (uint32_t)val;
++        return 1;
++    }
+ 
+     return 1;
+ }
+diff -rupN i3-4.11-original/i3bar/src/config.c i3-4.11-patched/i3bar/src/config.c
+--- i3-4.11-original/i3bar/src/config.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/i3bar/src/config.c	2015-10-11 13:51:17.179958943 -0300
+@@ -288,6 +288,12 @@ static int config_integer_cb(void *param
+         return 0;
+     }
+ 
++    if (!strcmp(cur_key, "bar_height")) {
++        DLOG("bar_height = %lld", val);
++        config.bar_height = (uint32_t)val;
++        return 1;
++    }
++
+     if (!strcmp(cur_key, "tray_padding")) {
+         DLOG("tray_padding = %lld\n", val);
+         config.tray_padding = val;
+@@ -300,8 +306,8 @@ static int config_integer_cb(void *param
+ /* A datastructure to pass all these callbacks to yajl */
+ static yajl_callbacks outputs_callbacks = {
+     .yajl_null = config_null_cb,
+-    .yajl_boolean = config_boolean_cb,
+     .yajl_integer = config_integer_cb,
++    .yajl_boolean = config_boolean_cb,
+     .yajl_string = config_string_cb,
+     .yajl_end_array = config_end_array_cb,
+     .yajl_map_key = config_map_key_cb,
+diff -rupN i3-4.11-original/i3bar/src/xcb.c i3-4.11-patched/i3bar/src/xcb.c
+--- i3-4.11-original/i3bar/src/xcb.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/i3bar/src/xcb.c	2015-10-11 13:51:17.180958943 -0300
+@@ -63,7 +63,7 @@ static i3Font font;
+ /* Icon size (based on font size) */
+ int icon_size;
+ 
+-/* Overall height of the bar (based on font size) */
++/* Overall height of the size */
+ int bar_height;
+ 
+ /* These are only relevant for XKB, which we only need for grabbing modifiers */
+@@ -184,7 +184,7 @@ static void draw_separator(uint32_t x, s
+         uint32_t separator_x = MAX(x - block->sep_block_width, center_x - separator_symbol_width / 2);
+         set_font_colors(statusline_ctx, colors.sep_fg, colors.bar_bg);
+         draw_text(config.separator_symbol, statusline_pm, statusline_ctx,
+-                  separator_x, logical_px(ws_voff_px), x - separator_x);
++                  separator_x, bar_height / 2 - font.height / 2, x - separator_x);
+     }
+ }
+ 
+@@ -210,6 +210,8 @@ void refresh_statusline(bool use_short_t
+             continue;
+ 
+         block->width = predict_text_width(block->full_text);
++        /* Add some padding. */
++        block->width += logical_px(2) + block->border_left + block->border_right;
+ 
+         /* Compute offset and append for text aligment in min_width. */
+         if (block->min_width <= block->width) {
+@@ -253,29 +255,54 @@ void refresh_statusline(bool use_short_t
+     TAILQ_FOREACH(block, &statusline_head, blocks) {
+         if (i3string_get_num_bytes(block->full_text) == 0)
+             continue;
+-        uint32_t fg_color;
+ 
+-        /* If this block is urgent, draw it with the defined color and border. */
+-        if (block->urgent) {
+-            fg_color = colors.urgent_ws_fg;
++        uint32_t fg_color = (block->color ? get_colorpixel(block->color) : colors.bar_fg);
++        if (block->border || block->background || block->urgent) {
++            if (block->urgent)
++                fg_color = colors.urgent_ws_fg;
+ 
+             uint32_t mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND;
+ 
+-            /* Draw the background */
+-            uint32_t bg_color = colors.urgent_ws_bg;
++            /* Let's determine the colors first. */
++            uint32_t border_color = colors.bar_bg;
++            uint32_t bg_color = colors.bar_bg;
++            if (block->urgent) {
++                border_color = colors.urgent_ws_border;
++                bg_color = colors.urgent_ws_bg;
++            } else {
++                if (block->border)
++                    border_color = get_colorpixel(block->border);
++
++                if (block->background)
++                    bg_color = get_colorpixel(block->background);
++            }
++
++            /* Draw the border. */
++            uint32_t border_values[] = {border_color, border_color};
++            xcb_change_gc(xcb_connection, statusline_ctx, mask, border_values);
++
++            xcb_rectangle_t border_rect = {x, logical_px(1),
++                                           block->width + block->x_offset + block->x_append, bar_height - logical_px(2)};
++            xcb_poly_fill_rectangle(xcb_connection, statusline_pm, statusline_ctx, 1, &border_rect);
++
++            /* Draw the background. */
++            bool is_border = !!block->border;
+             uint32_t bg_values[] = {bg_color, bg_color};
+             xcb_change_gc(xcb_connection, statusline_ctx, mask, bg_values);
+ 
+-            /* The urgent background “overshoots” by 2 px so that the text that
+-             * is printed onto it will not be look so cut off. */
+-            xcb_rectangle_t bg_rect = {x - logical_px(2), logical_px(1), block->width + logical_px(4), bar_height - logical_px(2)};
++            xcb_rectangle_t bg_rect = {
++                x + is_border * block->border_left,
++                logical_px(1) + is_border * block->border_top,
++                block->width + block->x_offset + block->x_append - is_border * (block->border_right + block->border_left),
++                bar_height - is_border * (block->border_bottom + block->border_top) - logical_px(2)};
+             xcb_poly_fill_rectangle(xcb_connection, statusline_pm, statusline_ctx, 1, &bg_rect);
+-        } else {
+-            fg_color = (block->color ? get_colorpixel(block->color) : colors.bar_fg);
+         }
+ 
+         set_font_colors(statusline_ctx, fg_color, colors.bar_bg);
+-        draw_text(block->full_text, statusline_pm, statusline_ctx, x + block->x_offset, logical_px(ws_voff_px), block->width);
++        draw_text(block->full_text, statusline_pm, statusline_ctx,
++                  x + block->x_offset + logical_px(1) + block->border_left,
++                  bar_height / 2 - font.height / 2,
++                  block->width - logical_px(1) - block->border_left - block->border_right);
+         x += block->width + block->sep_block_width + block->x_offset + block->x_append;
+ 
+         /* If this is not the last block, draw a separator. */
+@@ -1225,8 +1252,16 @@ void init_xcb_late(char *fontname) {
+     /* Load the font */
+     font = load_font(fontname, true);
+     set_font(&font);
+-    DLOG("Calculated font height: %d\n", font.height);
+-    bar_height = font.height + 2 * logical_px(ws_voff_px);
++    DLOG("Calculated font-height: %d\n", font.height);
++
++    /*
++     * If the bar height was explicitly set, use it. Otherwise, calculate it
++     * based on the font size.
++     */
++    if (config.bar_height <= 0)
++        bar_height = font.height + 2 * logical_px(ws_voff_px);
++    else
++        bar_height = config.bar_height;
+     icon_size = bar_height - 2 * logical_px(config.tray_padding);
+ 
+     if (config.separator_symbol)
+@@ -1867,7 +1902,7 @@ void draw_bars(bool unhide) {
+                 xcb_rectangle_t rect_border = {workspace_width,
+                                                logical_px(1),
+                                                ws_walk->name_width + 2 * logical_px(ws_hoff_px) + 2 * logical_px(1),
+-                                               font.height + 2 * logical_px(ws_voff_px) - 2 * logical_px(1)};
++                                               bar_height - 2 * logical_px(1)};
+                 xcb_poly_fill_rectangle(xcb_connection,
+                                         outputs_walk->buffer,
+                                         outputs_walk->bargc,
+@@ -1881,7 +1916,7 @@ void draw_bars(bool unhide) {
+                 xcb_rectangle_t rect = {workspace_width + logical_px(1),
+                                         2 * logical_px(1),
+                                         ws_walk->name_width + 2 * logical_px(ws_hoff_px),
+-                                        font.height + 2 * logical_px(ws_voff_px) - 4 * logical_px(1)};
++                                        bar_height - 4 * logical_px(1)};
+                 xcb_poly_fill_rectangle(xcb_connection,
+                                         outputs_walk->buffer,
+                                         outputs_walk->bargc,
+@@ -1890,7 +1925,7 @@ void draw_bars(bool unhide) {
+                 set_font_colors(outputs_walk->bargc, fg_color, bg_color);
+                 draw_text(ws_walk->name, outputs_walk->buffer, outputs_walk->bargc,
+                           workspace_width + logical_px(ws_hoff_px) + logical_px(1),
+-                          logical_px(ws_voff_px),
++                          bar_height / 2 - font.height / 2,
+                           ws_walk->name_width);
+ 
+                 workspace_width += 2 * logical_px(ws_hoff_px) + 2 * logical_px(1) + ws_walk->name_width;
+@@ -1911,10 +1946,7 @@ void draw_bars(bool unhide) {
+                           outputs_walk->bargc,
+                           mask,
+                           vals_border);
+-            xcb_rectangle_t rect_border = {workspace_width,
+-                                           logical_px(1),
+-                                           binding.width + 2 * logical_px(ws_hoff_px) + 2 * logical_px(1),
+-                                           font.height + 2 * logical_px(ws_voff_px) - 2 * logical_px(1)};
++            xcb_rectangle_t rect_border = {workspace_width, logical_px(1), binding.width + 2 * logical_px(ws_hoff_px) + 2 * logical_px(1), bar_height - 2 * logical_px(1)};
+             xcb_poly_fill_rectangle(xcb_connection,
+                                     outputs_walk->buffer,
+                                     outputs_walk->bargc,
+@@ -1926,10 +1958,7 @@ void draw_bars(bool unhide) {
+                           outputs_walk->bargc,
+                           mask,
+                           vals);
+-            xcb_rectangle_t rect = {workspace_width + logical_px(1),
+-                                    2 * logical_px(1),
+-                                    binding.width + 2 * logical_px(ws_hoff_px),
+-                                    font.height + 2 * logical_px(ws_voff_px) - 4 * logical_px(1)};
++            xcb_rectangle_t rect = {workspace_width + logical_px(1), 2 * logical_px(1), binding.width + 2 * logical_px(ws_hoff_px), bar_height - 4 * logical_px(1)};
+             xcb_poly_fill_rectangle(xcb_connection,
+                                     outputs_walk->buffer,
+                                     outputs_walk->bargc,
+@@ -1937,12 +1966,7 @@ void draw_bars(bool unhide) {
+                                     &rect);
+ 
+             set_font_colors(outputs_walk->bargc, fg_color, bg_color);
+-            draw_text(binding.name,
+-                      outputs_walk->buffer,
+-                      outputs_walk->bargc,
+-                      workspace_width + logical_px(ws_hoff_px) + logical_px(1),
+-                      logical_px(ws_voff_px),
+-                      binding.width);
++            draw_text(binding.name, outputs_walk->buffer, outputs_walk->bargc, workspace_width + logical_px(ws_hoff_px) + logical_px(1), bar_height / 2 - font.height / 2, binding.width);
+ 
+             unhide = true;
+             workspace_width += 2 * logical_px(ws_hoff_px) + 2 * logical_px(1) + binding.width;
+diff -rupN i3-4.11-original/include/atoms.xmacro i3-4.11-patched/include/atoms.xmacro
+--- i3-4.11-original/include/atoms.xmacro	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/include/atoms.xmacro	2015-10-11 13:51:17.180958943 -0300
+@@ -32,6 +32,7 @@ xmacro(_NET_ACTIVE_WINDOW)
+ xmacro(_NET_CLOSE_WINDOW)
+ xmacro(_NET_STARTUP_ID)
+ xmacro(_NET_WORKAREA)
++xmacro(_NET_WM_ICON)
+ xmacro(WM_PROTOCOLS)
+ xmacro(WM_DELETE_WINDOW)
+ xmacro(UTF8_STRING)
+diff -rupN i3-4.11-original/include/commands.h i3-4.11-patched/include/commands.h
+--- i3-4.11-original/include/commands.h	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/include/commands.h	2015-10-11 13:51:17.180958943 -0300
+@@ -317,3 +317,9 @@ void cmd_shmlog(I3_CMD, char *argument);
+  *
+  */
+ void cmd_debuglog(I3_CMD, char *argument);
++
++/**
++ * Implementation of 'gaps inner|outer current|all set|plus|minus <px>'
++ *
++ */
++void cmd_gaps(I3_CMD, char *type, char *scope, char *mode, char *value);
+diff -rupN i3-4.11-original/include/con.h i3-4.11-patched/include/con.h
+--- i3-4.11-original/include/con.h	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/include/con.h	2015-10-11 13:51:17.181958943 -0300
+@@ -181,6 +181,13 @@ Con *con_for_window(Con *con, i3Window *
+ int con_num_children(Con *con);
+ 
+ /**
++ * Returns the number of visible non-floating children of this container.
++ * For example, if the container contains a hsplit which has two children,
++ * this will return 2 instead of 1.
++ */
++int con_num_visible_children(Con *con);
++
++/**
+  * Attaches the given container to the given parent. This happens when moving
+  * a container or when inserting a new container at a specific place in the
+  * tree.
+@@ -409,7 +416,20 @@ void con_set_urgency(Con *con, bool urge
+ char *con_get_tree_representation(Con *con);
+ 
+ /**
++  * Calculates the effective gap sizes for a container depending
++  * on whether it is adjacent to the edge of the screen or another
++  * container.
++  */
++gaps_t calculate_effective_gaps(Con *con);
++
++/**
+  * force parent split containers to be redrawn
+  *
+  */
+ void con_force_split_parents_redraw(Con *con);
++
++/**
++ * Recursively check whether the (potential) parent container
++ * contains the (potential) child container.
++ */
++bool con_has_parent(Con *parent, Con *child);
+diff -rupN i3-4.11-original/include/config.h i3-4.11-patched/include/config.h
+--- i3-4.11-original/include/config.h	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/include/config.h	2015-10-11 13:51:17.181958943 -0300
+@@ -229,6 +229,15 @@ struct Config {
+ 
+     /* The number of currently parsed barconfigs */
+     int number_barconfigs;
++
++    /* Gap sizes */
++    gaps_t gaps;
++
++    /* Should single containers on a workspace receive a border? */
++    smart_borders_t smart_borders;
++
++    /* Disable gaps if there is only one container on the workspace */
++    bool smart_gaps;
+ };
+ 
+ /**
+@@ -317,6 +326,9 @@ struct Barconfig {
+     /** Enable verbose mode? Useful for debugging purposes. */
+     bool verbose;
+ 
++    /** Defines the height of the bar in pixels. */
++    uint32_t bar_height;
++
+     struct bar_colors {
+         char *background;
+         char *statusline;
+diff -rupN i3-4.11-original/include/config_directives.h i3-4.11-patched/include/config_directives.h
+--- i3-4.11-original/include/config_directives.h	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/include/config_directives.h	2015-10-11 13:51:17.181958943 -0300
+@@ -40,6 +40,9 @@ CFGFUN(criteria_pop_state);
+ CFGFUN(font, const char *font);
+ CFGFUN(exec, const char *exectype, const char *no_startup_id, const char *command);
+ CFGFUN(for_window, const char *command);
++CFGFUN(gaps, const char *workspace, const char *type, const long value);
++CFGFUN(smart_borders, const char *enable);
++CFGFUN(smart_gaps, const char *enable);
+ CFGFUN(floating_minimum_size, const long width, const long height);
+ CFGFUN(floating_maximum_size, const long width, const long height);
+ CFGFUN(default_orientation, const char *orientation);
+@@ -76,6 +79,7 @@ CFGFUN(bar_hidden_state, const char *hid
+ CFGFUN(bar_id, const char *bar_id);
+ CFGFUN(bar_output, const char *output);
+ CFGFUN(bar_verbose, const char *verbose);
++CFGFUN(bar_height, const long height);
+ CFGFUN(bar_modifier, const char *modifier);
+ CFGFUN(bar_wheel_up_cmd, const char *command);
+ CFGFUN(bar_wheel_down_cmd, const char *command);
+diff -rupN i3-4.11-original/include/data.h i3-4.11-patched/include/data.h
+--- i3-4.11-original/include/data.h	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/include/data.h	2015-10-11 13:51:17.182958943 -0300
+@@ -46,6 +46,7 @@ typedef struct Con Con;
+ typedef struct Match Match;
+ typedef struct Assignment Assignment;
+ typedef struct Window i3Window;
++typedef struct gaps_t gaps_t;
+ 
+ /******************************************************************************
+  * Helper types
+@@ -74,6 +75,9 @@ typedef enum { ADJ_NONE = 0,
+                ADJ_UPPER_SCREEN_EDGE = (1 << 2),
+                ADJ_LOWER_SCREEN_EDGE = (1 << 4) } adjacent_t;
+ 
++typedef enum { OFF,
++               ON,
++               NO_GAPS } smart_borders_t;
+ /**
+  * Container layouts. See Con::layout.
+  */
+@@ -122,6 +126,11 @@ typedef enum {
+     POINTER_WARPING_NONE = 1
+ } warping_t;
+ 
++struct gaps_t {
++    int inner;
++    int outer;
++};
++
+ /**
+  * Stores a rectangle, for example the size of a window, the child window etc.
+  * It needs to be packed so that the compiler will not add any padding bytes.
+@@ -181,12 +190,13 @@ struct deco_render_params {
+ };
+ 
+ /**
+- * Stores which workspace (by name or number) goes to which output.
++ * Stores which workspace (by name or number) goes to which output and its gaps config.
+  *
+  */
+ struct Workspace_Assignment {
+     char *name;
+     char *output;
++    gaps_t gaps;
+ 
+     TAILQ_ENTRY(Workspace_Assignment) ws_assignments;
+ };
+@@ -410,6 +420,12 @@ struct Window {
+     /** Depth of the window */
+     uint16_t depth;
+ 
++#ifdef USE_ICONS
++    /** Window icon, array of size 16x16 containing the ARGB pixels */
++    uint32_t* icon;
++#endif
++
++
+     /* the wanted size of the window, used in combination with size
+      * increments (see below). */
+     int base_width;
+@@ -560,6 +576,9 @@ struct Con {
+      * workspace is not a named workspace (for named workspaces, num == -1) */
+     int num;
+ 
++    /** Only applicable for containers of type CT_WORKSPACE. */
++    gaps_t gaps;
++
+     struct Con *parent;
+ 
+     struct Rect rect;
+diff -rupN i3-4.11-original/include/render.h i3-4.11-patched/include/render.h
+--- i3-4.11-original/include/render.h	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/include/render.h	2015-10-11 13:51:17.198958942 -0300
+@@ -18,7 +18,7 @@
+  * updated in X11.
+  *
+  */
+-void render_con(Con *con, bool render_fullscreen);
++void render_con(Con *con, bool render_fullscreen, bool already_inset);
+ 
+ /*
+  * Returns the height for the decorations
+diff -rupN i3-4.11-original/include/window.h i3-4.11-patched/include/window.h
+--- i3-4.11-original/include/window.h	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/include/window.h	2015-10-11 13:51:17.198958942 -0300
+@@ -82,6 +82,15 @@ void window_update_hints(i3Window *win,
+  */
+ void window_update_motif_hints(i3Window *win, xcb_get_property_reply_t *prop, border_style_t *motif_border_style);
+ 
++#ifdef USE_ICONS
++/**
++ * Updates the _NET_WM_ICON
++ *
++ */
++void window_update_icon(i3Window *win, xcb_get_property_reply_t *prop);
++
++#endif
++
+ /**
+  * Returns the window title considering the current title format.
+  * If no format is set, this will simply return the window's name.
+diff -rupN i3-4.11-original/parser-specs/commands.spec i3-4.11-patched/parser-specs/commands.spec
+--- i3-4.11-original/parser-specs/commands.spec	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/parser-specs/commands.spec	2015-10-11 13:51:17.198958942 -0300
+@@ -41,6 +41,7 @@ state INITIAL:
+   'title_format' -> TITLE_FORMAT
+   'mode' -> MODE
+   'bar' -> BAR
++  'gaps' -> GAPS
+ 
+ state CRITERIA:
+   ctype = 'class'       -> CRITERION
+@@ -90,6 +91,23 @@ state BORDER:
+   border_style = '1pixel'
+     -> call cmd_border($border_style, "1")
+ 
++# gaps inner|outer [current] [plus|minus] <px>
++state GAPS:
++  type = 'inner', 'outer'
++      -> GAPS_WITH_TYPE
++
++state GAPS_WITH_TYPE:
++  scope = 'current', 'all'
++      -> GAPS_WITH_SCOPE
++
++state GAPS_WITH_SCOPE:
++  mode = 'plus', 'minus', 'set'
++      -> GAPS_WITH_MODE
++
++state GAPS_WITH_MODE:
++  value = word
++      -> call cmd_gaps($type, $scope, $mode, $value)
++
+ state BORDER_WIDTH:
+   end
+     -> call cmd_border($border_style, "2")
+diff -rupN i3-4.11-original/parser-specs/config.spec i3-4.11-patched/parser-specs/config.spec
+--- i3-4.11-original/parser-specs/config.spec	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/parser-specs/config.spec	2015-10-11 13:51:17.198958942 -0300
+@@ -22,6 +22,9 @@ state INITIAL:
+   'bar'                                    -> BARBRACE
+   'font'                                   -> FONT
+   'mode'                                   -> MODENAME
++  'gaps'                                   -> GAPS
++  'smart_borders'                          -> SMART_BORDERS
++  'smart_gaps'                             -> SMART_GAPS
+   'floating_minimum_size'                  -> FLOATING_MINIMUM_SIZE_WIDTH
+   'floating_maximum_size'                  -> FLOATING_MAXIMUM_SIZE_WIDTH
+   'floating_modifier'                      -> FLOATING_MODIFIER
+@@ -56,6 +59,28 @@ state IGNORE_LINE:
+   line
+       -> INITIAL
+ 
++# gaps inner|outer <px>
++state GAPS:
++  scope = 'inner', 'outer'
++      -> GAPS_WITH_SCOPE
++
++state GAPS_WITH_SCOPE:
++  value = number
++      -> call cfg_gaps($workspace, $scope, &value)
++
++# smart_borders true|false
++# smart_borders no_gaps
++state SMART_BORDERS:
++  enabled = '1', 'yes', 'true', 'on', 'enable', 'active'
++      -> call cfg_smart_borders($enabled)
++  enabled = 'no_gaps'
++      -> call cfg_smart_borders($enabled)
++
++# smart_gaps on|off
++state SMART_GAPS:
++  enabled = '1', 'yes', 'true', 'on', 'enable', 'active'
++      -> call cfg_smart_gaps($enabled)
++
+ # floating_minimum_size <width> x <height>
+ state FLOATING_MINIMUM_SIZE_WIDTH:
+   width = number
+@@ -233,13 +258,16 @@ state FOCUS_ON_WINDOW_ACTIVATION:
+       -> call cfg_focus_on_window_activation($mode)
+ 
+ # workspace <workspace> output <output>
++# workspace <workspace> gaps inner|outer <px>
+ state WORKSPACE:
+   workspace = word
+-    -> WORKSPACE_OUTPUT
++    -> WORKSPACE_COMMAND
+ 
+-state WORKSPACE_OUTPUT:
++state WORKSPACE_COMMAND:
+   'output'
+       -> WORKSPACE_OUTPUT_STR
++  'gaps'
++      -> GAPS
+ 
+ state WORKSPACE_OUTPUT_STR:
+   output = word
+@@ -409,6 +437,7 @@ state BAR:
+   'workspace_buttons'      -> BAR_WORKSPACE_BUTTONS
+   'strip_workspace_numbers' -> BAR_STRIP_WORKSPACE_NUMBERS
+   'verbose'                -> BAR_VERBOSE
++  'height'                 -> BAR_HEIGHT
+   'colors'                 -> BAR_COLORS_BRACE
+   '}'
+       -> call cfg_bar_finish(); INITIAL
+@@ -508,6 +537,10 @@ state BAR_VERBOSE:
+   value = word
+       -> call cfg_bar_verbose($value); BAR
+ 
++state BAR_HEIGHT:
++  value = number
++      -> call cfg_bar_height(&value); BAR
++
+ state BAR_COLORS_BRACE:
+   end
+       ->
+diff -rupN i3-4.11-original/src/commands.c i3-4.11-patched/src/commands.c
+--- i3-4.11-original/src/commands.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/commands.c	2015-10-11 13:51:17.199958942 -0300
+@@ -967,7 +967,7 @@ void cmd_append_layout(I3_CMD, char *pat
+     // is not executed yet and will be batched with append_layout’s
+     // needs_tree_render after the parser finished. We should check if that is
+     // necessary at all.
+-    render_con(croot, false);
++    render_con(croot, false, false);
+ 
+     restore_open_placeholder_windows(parent);
+ 
+@@ -2216,3 +2216,65 @@ void cmd_debuglog(I3_CMD, char *argument
+     // XXX: default reply for now, make this a better reply
+     ysuccess(true);
+ }
++
++/**
++ * Implementation of 'gaps inner|outer current|all set|plus|minus <px>'
++ *
++ */
++void cmd_gaps(I3_CMD, char *type, char *scope, char *mode, char *value) {
++#define CMD_GAPS(type, other)                                      \
++    int pixels = atoi(value);                                      \
++    Con *workspace = con_get_workspace(focused);                   \
++                                                                   \
++    int current_value = config.gaps.type;                          \
++    if (strcmp(scope, "current") == 0)                             \
++        current_value += workspace->gaps.type;                     \
++                                                                   \
++    bool reset = false;                                            \
++    if (!strcmp(mode, "plus"))                                     \
++        current_value += pixels;                                   \
++    else if (!strcmp(mode, "minus"))                               \
++        current_value -= pixels;                                   \
++    else if (!strcmp(mode, "set")) {                               \
++        current_value = pixels;                                    \
++        reset = true;                                              \
++    } else {                                                       \
++        ELOG("Invalid mode %s when changing gaps", mode);          \
++        ysuccess(false);                                           \
++        return;                                                    \
++    }                                                              \
++                                                                   \
++    if (current_value < 0)                                         \
++        current_value = 0;                                         \
++                                                                   \
++    if (!strcmp(scope, "all")) {                                   \
++        Con *output, *cur_ws = NULL;                               \
++        TAILQ_FOREACH(output, &(croot->nodes_head), nodes) {       \
++            Con *content = output_get_content(output);             \
++            TAILQ_FOREACH(cur_ws, &(content->nodes_head), nodes) { \
++                if (reset)                                         \
++                    cur_ws->gaps.type = 0;                         \
++                else if (current_value + cur_ws->gaps.type < 0)    \
++                    cur_ws->gaps.type = -current_value;            \
++            }                                                      \
++        }                                                          \
++                                                                   \
++        config.gaps.type = current_value;                          \
++    } else {                                                       \
++        workspace->gaps.type = current_value - config.gaps.type;   \
++    }
++
++    if (!strcmp(type, "inner")) {
++        CMD_GAPS(inner, outer);
++    } else if (!strcmp(type, "outer")) {
++        CMD_GAPS(outer, inner);
++    } else {
++        ELOG("Invalid type %s when changing gaps", type);
++        ysuccess(false);
++        return;
++    }
++
++    cmd_output->needs_tree_render = true;
++    // XXX: default reply for now, make this a better reply
++    ysuccess(true);
++}
+diff -rupN i3-4.11-original/src/con.c i3-4.11-patched/src/con.c
+--- i3-4.11-original/src/con.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/con.c	2015-10-11 13:51:17.200958942 -0300
+@@ -646,6 +646,32 @@ int con_num_children(Con *con) {
+     return children;
+ }
+ 
++/**
++ * Returns the number of visible non-floating children of this container.
++ * For example, if the container contains a hsplit which has two children,
++ * this will return 2 instead of 1.
++ */
++int con_num_visible_children(Con *con) {
++    if (con == NULL)
++        return 0;
++
++    int children = 0;
++    Con *current = NULL;
++    TAILQ_FOREACH(current, &(con->nodes_head), nodes) {
++        /* Leaf nodes are a child. */
++        if (con_is_leaf(current))
++            children++;
++        /* Stacked and tabbed containers are only considered one child. */
++        else if (current->layout == L_TABBED || current->layout == L_STACKED)
++            children++;
++        /* Split containers need to be recursed. */
++        else if (current->layout == L_SPLITH || current->layout == L_SPLITV)
++            children += con_num_visible_children(current);
++    }
++
++    return children;
++}
++
+ /*
+  * Updates the percent attribute of the children of the given container. This
+  * function needs to be called when a window is added or removed from a
+@@ -1323,6 +1349,11 @@ Con *con_descend_direction(Con *con, dir
+  *
+  */
+ Rect con_border_style_rect(Con *con) {
++    if ((config.smart_borders == ON && con_num_visible_children(con_get_workspace(con)) <= 1) || (config.smart_borders == NO_GAPS && calculate_effective_gaps(con).outer == 0)) {
++        if (!con_is_floating(con))
++            return (Rect){0, 0, 0, 0};
++    }
++
+     adjacent_t borders_to_hide = ADJ_NONE;
+     int border_width = con->current_border_width;
+     DLOG("The border width for con is set to: %d\n", con->current_border_width);
+@@ -1914,3 +1945,38 @@ char *con_get_tree_representation(Con *c
+ 
+     return complete_buf;
+ }
++
++/**
++ * Calculates the effective gap sizes for a container.
++ */
++gaps_t calculate_effective_gaps(Con *con) {
++    Con *workspace = con_get_workspace(con);
++    if (workspace == NULL || (config.smart_gaps && con_num_visible_children(workspace) <= 1))
++        return (gaps_t){0, 0};
++
++    gaps_t gaps = {
++        .inner = (workspace->gaps.inner + config.gaps.inner) / 2,
++        .outer = workspace->gaps.outer + config.gaps.outer};
++
++    /* Outer gaps are added on top of inner gaps. */
++    gaps.outer += 2 * gaps.inner;
++
++    return gaps;
++}
++
++/**
++ * Recursively check whether the (potential) parent container
++ * contains the (potential) child container.
++ */
++bool con_has_parent(Con *parent, Con *child) {
++    Con *current = NULL;
++    TAILQ_FOREACH(current, &(parent->nodes_head), nodes) {
++        if (current == child)
++            return true;
++
++        if (con_has_parent(current, child))
++            return true;
++    }
++
++    return false;
++}
+diff -rupN i3-4.11-original/src/config.c i3-4.11-patched/src/config.c
+--- i3-4.11-original/src/config.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/config.c	2015-10-11 13:51:17.200958942 -0300
+@@ -202,6 +202,9 @@ void load_configuration(xcb_connection_t
+     /* Set default_orientation to NO_ORIENTATION for auto orientation. */
+     config.default_orientation = NO_ORIENTATION;
+ 
++    config.gaps.inner = 0;
++    config.gaps.outer = 0;
++
+     /* Set default urgency reset delay to 500ms */
+     if (config.workspace_urgency_timer == 0)
+         config.workspace_urgency_timer = 0.5;
+diff -rupN i3-4.11-original/src/config_directives.c i3-4.11-patched/src/config_directives.c
+--- i3-4.11-original/src/config_directives.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/config_directives.c	2015-10-11 13:51:17.200958942 -0300
+@@ -257,6 +257,59 @@ CFGFUN(for_window, const char *command)
+     TAILQ_INSERT_TAIL(&assignments, assignment, assignments);
+ }
+ 
++void create_gaps_assignment(const char *workspace, bool inner, const long value) {
++    DLOG("Setting gaps for workspace %s", workspace);
++
++    struct Workspace_Assignment *assignment;
++    TAILQ_FOREACH(assignment, &ws_assignments, ws_assignments) {
++        if (strcasecmp(assignment->name, workspace) == 0) {
++            if (inner)
++                assignment->gaps.inner = value;
++            else
++                assignment->gaps.outer = value;
++
++            return;
++        }
++    }
++
++    // Assignment does not yet exist, let's create it.
++    assignment = scalloc(1, sizeof(struct Workspace_Assignment));
++    assignment->name = sstrdup(workspace);
++    assignment->output = NULL;
++    if (inner)
++        assignment->gaps.inner = value;
++    else
++        assignment->gaps.outer = value;
++    TAILQ_INSERT_TAIL(&ws_assignments, assignment, ws_assignments);
++}
++
++CFGFUN(gaps, const char *workspace, const char *scope, const long value) {
++    if (!strcmp(scope, "inner")) {
++        if (workspace == NULL)
++            config.gaps.inner = value;
++        else
++            create_gaps_assignment(workspace, true, value - config.gaps.inner);
++    } else if (!strcmp(scope, "outer")) {
++        if (workspace == NULL)
++            config.gaps.outer = value;
++        else
++            create_gaps_assignment(workspace, false, value - config.gaps.outer);
++    } else {
++        ELOG("Invalid command, cannot process scope %s", scope);
++    }
++}
++
++CFGFUN(smart_borders, const char *enable) {
++    if (!strcmp(enable, "no_gaps"))
++        config.smart_borders = NO_GAPS;
++    else
++        config.smart_borders = eval_boolstr(enable) ? ON : OFF;
++}
++
++CFGFUN(smart_gaps, const char *enable) {
++    config.smart_gaps = eval_boolstr(enable);
++}
++
+ CFGFUN(floating_minimum_size, const long width, const long height) {
+     config.floating_minimum_width = width;
+     config.floating_minimum_height = height;
+@@ -397,8 +450,9 @@ CFGFUN(workspace, const char *workspace,
+     bool duplicate = false;
+     TAILQ_FOREACH(assignment, &ws_assignments, ws_assignments) {
+         if (strcasecmp(assignment->name, workspace) == 0) {
+-            ELOG("You have a duplicate workspace assignment for workspace \"%s\"\n",
+-                 workspace);
++            if (assignment->output != NULL)
++                ELOG("You have a duplicate workspace assignment for workspace \"%s\"\n", workspace);
++
+             assignment->output = sstrdup(output);
+             duplicate = true;
+         }
+@@ -521,6 +575,10 @@ CFGFUN(bar_verbose, const char *verbose)
+     current_bar.verbose = eval_boolstr(verbose);
+ }
+ 
++CFGFUN(bar_height, const long height) {
++    current_bar.bar_height = (uint32_t)height;
++}
++
+ CFGFUN(bar_modifier, const char *modifier) {
+     if (strcmp(modifier, "Mod1") == 0)
+         current_bar.modifier = M_MOD1;
+diff -rupN i3-4.11-original/src/floating.c i3-4.11-patched/src/floating.c
+--- i3-4.11-original/src/floating.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/floating.c	2015-10-11 13:51:17.201958942 -0300
+@@ -291,8 +291,8 @@ void floating_enable(Con *con, bool auto
+     TAILQ_INSERT_TAIL(&(nc->focus_head), con, focused);
+ 
+     /* render the cons to get initial window_rect correct */
+-    render_con(nc, false);
+-    render_con(con, false);
++    render_con(nc, false, true);
++    render_con(con, false, true);
+ 
+     if (set_focus)
+         con_focus(con);
+@@ -478,7 +478,7 @@ DRAGGING_CB(drag_window_callback) {
+     con->rect.x = old_rect->x + (new_x - event->root_x);
+     con->rect.y = old_rect->y + (new_y - event->root_y);
+ 
+-    render_con(con, false);
++    render_con(con, false, true);
+     x_push_node(con);
+     xcb_flush(conn);
+ 
+diff -rupN i3-4.11-original/src/ipc.c i3-4.11-patched/src/ipc.c
+--- i3-4.11-original/src/ipc.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/ipc.c	2015-10-11 13:51:17.201958942 -0300
+@@ -121,6 +121,16 @@ static void dump_rect(yajl_gen gen, cons
+     y(map_close);
+ }
+ 
++static void dump_gaps(yajl_gen gen, const char *name, gaps_t gaps) {
++    ystr(name);
++    y(map_open);
++    ystr("inner");
++    y(integer, gaps.inner);
++    ystr("outer");
++    y(integer, gaps.outer);
++    y(map_close);
++}
++
+ static void dump_event_state_mask(yajl_gen gen, Binding *bind) {
+     y(array_open);
+     for (int i = 0; i < 20; i++) {
+@@ -368,6 +378,8 @@ void dump_node(yajl_gen gen, struct Con
+     if (con->type == CT_WORKSPACE) {
+         ystr("num");
+         y(integer, con->num);
++
++        dump_gaps(gen, "gaps", con->gaps);
+     }
+ 
+     ystr("window");
+@@ -625,6 +637,11 @@ static void dump_bar_config(yajl_gen gen
+     YSTR_IF_SET(status_command);
+     YSTR_IF_SET(font);
+ 
++    if (config->bar_height) {
++        ystr("bar_height");
++        y(integer, config->bar_height);
++    }
++
+     if (config->separator_symbol) {
+         ystr("separator_symbol");
+         ystr(config->separator_symbol);
+diff -rupN i3-4.11-original/src/load_layout.c i3-4.11-patched/src/load_layout.c
+--- i3-4.11-original/src/load_layout.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/load_layout.c	2015-10-11 13:51:17.201958942 -0300
+@@ -22,6 +22,7 @@
+ static char *last_key;
+ static Con *json_node;
+ static Con *to_focus;
++static bool parsing_gaps;
+ static bool parsing_swallows;
+ static bool parsing_rect;
+ static bool parsing_deco_rect;
+@@ -48,7 +49,7 @@ static int json_start_map(void *ctx) {
+         match_init(current_swallow);
+         TAILQ_INSERT_TAIL(&(json_node->swallow_head), current_swallow, matches);
+     } else {
+-        if (!parsing_rect && !parsing_deco_rect && !parsing_window_rect && !parsing_geometry) {
++        if (!parsing_rect && !parsing_deco_rect && !parsing_window_rect && !parsing_geometry && !parsing_gaps) {
+             if (last_key && strcasecmp(last_key, "floating_nodes") == 0) {
+                 DLOG("New floating_node\n");
+                 Con *ws = con_get_workspace(json_node);
+@@ -69,7 +70,7 @@ static int json_start_map(void *ctx) {
+ 
+ static int json_end_map(void *ctx) {
+     LOG("end of map\n");
+-    if (!parsing_swallows && !parsing_rect && !parsing_deco_rect && !parsing_window_rect && !parsing_geometry) {
++    if (!parsing_swallows && !parsing_rect && !parsing_deco_rect && !parsing_window_rect && !parsing_geometry && !parsing_gaps) {
+         /* Set a few default values to simplify manually crafted layout files. */
+         if (json_node->layout == L_DEFAULT) {
+             DLOG("Setting layout = L_SPLITH\n");
+@@ -150,6 +151,7 @@ static int json_end_map(void *ctx) {
+         json_node = json_node->parent;
+     }
+ 
++    parsing_gaps = false;
+     parsing_rect = false;
+     parsing_deco_rect = false;
+     parsing_window_rect = false;
+@@ -199,6 +201,9 @@ static int json_key(void *ctx, const uns
+     if (strcasecmp(last_key, "swallows") == 0)
+         parsing_swallows = true;
+ 
++    if (strcasecmp(last_key, "gaps") == 0)
++        parsing_gaps = true;
++
+     if (strcasecmp(last_key, "rect") == 0)
+         parsing_rect = true;
+ 
+@@ -429,6 +434,12 @@ static int json_int(void *ctx, long long
+             current_swallow->insert_where = val;
+         }
+     }
++    if (parsing_gaps) {
++        if (strcasecmp(last_key, "inner") == 0)
++            json_node->gaps.inner = val;
++        else if (strcasecmp(last_key, "outer") == 0)
++            json_node->gaps.outer = val;
++    }
+ 
+     return 1;
+ }
+@@ -583,6 +594,7 @@ void tree_append_json(Con *con, const ch
+     yajl_status stat;
+     json_node = con;
+     to_focus = NULL;
++    parsing_gaps = false;
+     parsing_swallows = false;
+     parsing_rect = false;
+     parsing_deco_rect = false;
+diff -rupN i3-4.11-original/src/manage.c i3-4.11-patched/src/manage.c
+--- i3-4.11-original/src/manage.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/manage.c	2015-10-11 13:51:17.202958942 -0300
+@@ -92,6 +92,10 @@ void manage_window(xcb_window_t window,
+         role_cookie, startup_id_cookie, wm_hints_cookie,
+         wm_normal_hints_cookie, motif_wm_hints_cookie;
+ 
++#ifdef USE_ICONS
++    xcb_get_property_cookie_t wm_icon_cookie;
++#endif
++
+     geomc = xcb_get_geometry(conn, d);
+ 
+     /* Check if the window is mapped (it could be not mapped when intializing and
+@@ -161,6 +165,9 @@ void manage_window(xcb_window_t window,
+     wm_hints_cookie = xcb_icccm_get_wm_hints(conn, window);
+     wm_normal_hints_cookie = xcb_icccm_get_wm_normal_hints(conn, window);
+     motif_wm_hints_cookie = GET_PROPERTY(A__MOTIF_WM_HINTS, 5 * sizeof(uint64_t));
++#ifdef USE_ICONS
++    wm_icon_cookie = xcb_get_property_unchecked(conn, false, window, A__NET_WM_ICON, XCB_ATOM_CARDINAL, 0, UINT32_MAX);
++#endif
+ 
+     DLOG("Managing window 0x%08x\n", window);
+ 
+@@ -187,6 +194,9 @@ void manage_window(xcb_window_t window,
+     window_update_hints(cwindow, xcb_get_property_reply(conn, wm_hints_cookie, NULL), &urgency_hint);
+     border_style_t motif_border_style = BS_NORMAL;
+     window_update_motif_hints(cwindow, xcb_get_property_reply(conn, motif_wm_hints_cookie, NULL), &motif_border_style);
++#ifdef USE_ICONS
++    window_update_icon(cwindow, xcb_get_property_reply(conn, wm_icon_cookie, NULL));
++#endif
+     xcb_size_hints_t wm_size_hints;
+     if (!xcb_icccm_get_wm_size_hints_reply(conn, wm_normal_hints_cookie, &wm_size_hints, NULL))
+         memset(&wm_size_hints, '\0', sizeof(xcb_size_hints_t));
+@@ -513,13 +523,13 @@ void manage_window(xcb_window_t window,
+          * workspace at all. However, just calling render_con() on the
+          * workspace isn’t enough either — it needs the rect. */
+         ws->rect = ws->parent->rect;
+-        render_con(ws, true);
++        render_con(ws, true, false);
+         /* Disable setting focus, otherwise we’d move focus to an invisible
+          * workspace, which we generally prevent (e.g. in
+          * con_move_to_workspace). */
+         set_focus = false;
+     }
+-    render_con(croot, false);
++    render_con(croot, false, false);
+ 
+     /* Send an event about window creation */
+     ipc_send_window_event("new", nc);
+diff -rupN i3-4.11-original/src/randr.c i3-4.11-patched/src/randr.c
+--- i3-4.11-original/src/randr.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/randr.c	2015-10-11 13:51:17.202958942 -0300
+@@ -365,7 +365,7 @@ void init_ws_for_output(Output *output,
+     /* go through all assignments and move the existing workspaces to this output */
+     struct Workspace_Assignment *assignment;
+     TAILQ_FOREACH(assignment, &ws_assignments, ws_assignments) {
+-        if (strcmp(assignment->output, output->name) != 0)
++        if (assignment->output == NULL || strcmp(assignment->output, output->name) != 0)
+             continue;
+ 
+         /* check if this workspace actually exists */
+@@ -406,7 +406,7 @@ void init_ws_for_output(Output *output,
+          * Then, we need to work with the "content" container, since we cannot
+          * be sure that the workspace itself was rendered at all (in case it’s
+          * invisible, it won’t be rendered). */
+-        render_con(workspace_out, false);
++        render_con(workspace_out, false, true);
+         Con *ws_out_content = output_get_content(workspace_out);
+ 
+         Con *floating_con;
+@@ -446,7 +446,7 @@ void init_ws_for_output(Output *output,
+ 
+     /* otherwise, we create the first assigned ws for this output */
+     TAILQ_FOREACH(assignment, &ws_assignments, ws_assignments) {
+-        if (strcmp(assignment->output, output->name) != 0)
++        if (assignment->output == NULL || strcmp(assignment->output, output->name) != 0)
+             continue;
+ 
+         LOG("Initializing first assigned workspace \"%s\" for output \"%s\"\n",
+diff -rupN i3-4.11-original/src/render.c i3-4.11-patched/src/render.c
+--- i3-4.11-original/src/render.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/render.c	2015-10-11 13:51:17.203958942 -0300
+@@ -20,10 +20,7 @@ static bool show_debug_borders = false;
+  * Returns the height for the decorations
+  */
+ int render_deco_height(void) {
+-    int deco_height = config.font.height + 4;
+-    if (config.font.height & 0x01)
+-        ++deco_height;
+-    return deco_height;
++    return config.font.height + 2;
+ }
+ 
+ /*
+@@ -71,7 +68,7 @@ static void render_l_output(Con *con) {
+     if (fullscreen) {
+         fullscreen->rect = con->rect;
+         x_raise_con(fullscreen);
+-        render_con(fullscreen, true);
++        render_con(fullscreen, true, false);
+         return;
+     }
+ 
+@@ -111,11 +108,54 @@ static void render_l_output(Con *con) {
+         DLOG("child at (%d, %d) with (%d x %d)\n",
+              child->rect.x, child->rect.y, child->rect.width, child->rect.height);
+         x_raise_con(child);
+-        render_con(child, false);
++        render_con(child, false, child->type == CT_DOCKAREA);
+     }
+ }
+ 
+ /*
++ * Decides whether the container should be inset.
++ */
++bool should_inset_con(Con *con, int children) {
++    /* Don't inset floating containers and workspaces. */
++    if (con->type == CT_FLOATING_CON || con->type == CT_WORKSPACE)
++        return false;
++
++    if (con_is_leaf(con))
++        return true;
++
++    return (con->layout == L_STACKED || con->layout == L_TABBED) && children > 0;
++}
++
++/*
++ * Returns whether the given container has an adjacent container in the
++ * specified direction. In other words, this returns true if and only if
++ * the container is not touching the edge of the screen in that direction.
++ */
++bool has_adjacent_container(Con *con, direction_t direction) {
++    Con *workspace = con_get_workspace(con);
++    Con *fullscreen = con_get_fullscreen_con(workspace, CF_GLOBAL);
++    if (fullscreen == NULL)
++        fullscreen = con_get_fullscreen_con(workspace, CF_OUTPUT);
++
++    /* If this container is fullscreen by itself, there's no adjacent container. */
++    if (con == fullscreen)
++        return false;
++
++    Con *first = con;
++    Con *second = NULL;
++    bool found_neighbor = resize_find_tiling_participants(&first, &second, direction);
++    if (!found_neighbor)
++        return false;
++
++    /* If we have an adjacent container and nothing is fullscreen, we consider it. */
++    if (fullscreen == NULL)
++        return true;
++
++    /* For fullscreen containers, only consider the adjacent container if it is also fullscreen. */
++    return con_has_parent(fullscreen, con) && con_has_parent(fullscreen, second);
++}
++
++/*
+  * "Renders" the given container (and its children), meaning that all rects are
+  * updated correctly. Note that this function does not call any xcb_*
+  * functions, so the changes are completely done in memory only (and
+@@ -123,7 +163,7 @@ static void render_l_output(Con *con) {
+  * updated in X11.
+  *
+  */
+-void render_con(Con *con, bool render_fullscreen) {
++void render_con(Con *con, bool render_fullscreen, bool already_inset) {
+     int children = con_num_children(con);
+     DLOG("Rendering %snode %p / %s / layout %d / children %d\n",
+          (render_fullscreen ? "fullscreen " : ""), con, con->name, con->layout,
+@@ -142,6 +182,28 @@ void render_con(Con *con, bool render_fu
+         rect.height -= 2 * 2;
+     }
+ 
++    bool should_inset = should_inset_con(con, children);
++    if (!already_inset && should_inset) {
++        gaps_t gaps = calculate_effective_gaps(con);
++        Rect inset = (Rect){
++            has_adjacent_container(con, D_LEFT) ? gaps.inner : gaps.outer,
++            has_adjacent_container(con, D_UP) ? gaps.inner : gaps.outer,
++            has_adjacent_container(con, D_RIGHT) ? -gaps.inner : -gaps.outer,
++            has_adjacent_container(con, D_DOWN) ? -gaps.inner : -gaps.outer};
++        inset.width -= inset.x;
++        inset.height -= inset.y;
++
++        rect = rect_add(rect, inset);
++        if (!render_fullscreen) {
++            con->rect = rect_add(con->rect, inset);
++            if (con->window) {
++                con->window_rect = rect_add(con->window_rect, inset);
++            }
++        }
++        inset.height = -inset.y;
++        con->deco_rect = rect_add(con->deco_rect, inset);
++    }
++
+     int x = rect.x;
+     int y = rect.y;
+ 
+@@ -209,7 +271,7 @@ void render_con(Con *con, bool render_fu
+     if (fullscreen) {
+         fullscreen->rect = rect;
+         x_raise_con(fullscreen);
+-        render_con(fullscreen, true);
++        render_con(fullscreen, true, false);
+         /* Fullscreen containers are either global (underneath the CT_ROOT
+          * container) or per-output (underneath the CT_CONTENT container). For
+          * global fullscreen containers, we cannot abort rendering here yet,
+@@ -223,6 +285,11 @@ void render_con(Con *con, bool render_fu
+ 
+     /* find the height for the decorations */
+     int deco_height = render_deco_height();
++#ifdef USE_ICONS
++    /* minimum decoration height to allow icon to fit
++     * not actuuly required, icon would be cropped otherwise */
++    deco_height = deco_height<12 ? 12 : deco_height;
++#endif
+ 
+     /* precalculate the sizes to be able to correct rounding errors */
+     int sizes[children];
+@@ -257,7 +324,7 @@ void render_con(Con *con, bool render_fu
+         Con *output;
+         if (!fullscreen) {
+             TAILQ_FOREACH(output, &(con->nodes_head), nodes) {
+-                render_con(output, false);
++                render_con(output, false, false);
+             }
+         }
+ 
+@@ -326,7 +393,7 @@ void render_con(Con *con, bool render_fu
+                 DLOG("floating child at (%d,%d) with %d x %d\n",
+                      child->rect.x, child->rect.y, child->rect.width, child->rect.height);
+                 x_raise_con(child);
+-                render_con(child, false);
++                render_con(child, false, true);
+             }
+         }
+ 
+@@ -434,7 +501,7 @@ void render_con(Con *con, bool render_fu
+             DLOG("child at (%d, %d) with (%d x %d)\n",
+                  child->rect.x, child->rect.y, child->rect.width, child->rect.height);
+             x_raise_con(child);
+-            render_con(child, false);
++            render_con(child, false, should_inset || already_inset);
+             i++;
+         }
+ 
+@@ -447,7 +514,7 @@ void render_con(Con *con, bool render_fu
+              * that we have a non-leaf-container inside the stack. In that
+              * case, the children of the non-leaf-container need to be raised
+              * aswell. */
+-                render_con(child, false);
++                render_con(child, false, true);
+             }
+ 
+             if (children != 1)
+diff -rupN i3-4.11-original/src/tree.c i3-4.11-patched/src/tree.c
+--- i3-4.11-original/src/tree.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/tree.c	2015-10-11 13:51:17.203958942 -0300
+@@ -268,6 +268,9 @@ bool tree_close(Con *con, kill_window_t
+         FREE(con->window->class_class);
+         FREE(con->window->class_instance);
+         i3string_free(con->window->name);
++#ifdef USE_ICONS
++        FREE(con->window->icon);
++#endif
+         FREE(con->window->ran_assignments);
+         FREE(con->window);
+     }
+@@ -523,7 +526,7 @@ void tree_render(void) {
+     mark_unmapped(croot);
+     croot->mapped = true;
+ 
+-    render_con(croot, false);
++    render_con(croot, false, false);
+ 
+     x_push_changes(croot);
+     DLOG("-- END RENDERING --\n");
+diff -rupN i3-4.11-original/src/window.c i3-4.11-patched/src/window.c
+--- i3-4.11-original/src/window.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/window.c	2015-10-11 13:51:17.203958942 -0300
+@@ -334,6 +334,87 @@ void window_update_motif_hints(i3Window
+ #undef MWM_DECOR_TITLE
+ }
+ 
++
++#ifdef USE_ICONS
++/*
++ * Copy and resize icon if needed
++ */
++void copy_icon_with_resize(uint32_t *dst, int width, int height, uint32_t* src, int s_width, int s_height)
++{
++    int i, j;
++    if (width==s_width && height==s_height) {
++        /*  easy case, same dimensions, just copy data */
++        memcpy(dst, src, width*height*sizeof(uint32_t));
++    }
++    else {
++        uint32_t* row = src;
++        int xstep = s_width/width;
++        int ystep = s_height/height*s_width;
++
++        for(i=0; i < height; ++i) {
++            uint32_t* ptr = row;
++            for(j=0; j < width; ++j) {
++                *dst++ = *ptr;
++                ptr+=xstep;
++            }
++            row += ystep;
++        }
++    }
++}
++
++
++void window_update_icon(i3Window *win, xcb_get_property_reply_t *prop)
++{
++    uint32_t *data = NULL;
++    uint64_t len = 0;
++
++    if(!prop || prop->type != XCB_ATOM_CARDINAL || prop->format != 32) {
++            DLOG("_NET_WM_ICON is not set\n");
++        FREE(prop);
++        return;
++    }
++
++    uint32_t prop_value_len = xcb_get_property_value_length(prop);
++    uint32_t *prop_value = (uint32_t *) xcb_get_property_value(prop);
++
++    /* Find the number of icons in the reply. */
++    while(prop_value_len > (sizeof(uint32_t) * 2) && prop_value && prop_value[0] && prop_value[1])
++    {
++        /* Check that the property is as long as it should be (in bytes),
++         handling integer overflow. "+2" to handle the width and height
++         fields. */
++        const uint64_t crt_len = prop_value[0] * (uint64_t) prop_value[1];
++        const uint64_t expected_len = (crt_len + 2) * 4;
++        if(expected_len > prop_value_len)
++            break;
++
++        if (len==0 || (crt_len>=16*16 && crt_len<len)) {
++            len = crt_len;
++            data  = prop_value;
++        }
++        if (len==16*16) break; // found 16 pixels icon
++
++        /* Find pointer to next icon in the reply. */
++        prop_value_len -= expected_len;
++        prop_value = (uint32_t *) (((uint8_t *) prop_value) + expected_len);
++    }
++
++    if (!data ) {
++        DLOG("Could not get _NET_WM_ICON\n");
++        free(prop);
++        return;
++    }
++
++    LOG("Got _NET_WM_ICON of size: (%d,%d)\n", data[0], data[1]);
++
++    FREE(win->icon);
++    win->icon = malloc(16*16*sizeof(uint32_t));
++    copy_icon_with_resize(win->icon, 16, 16, data+2, data[0], data[1]);
++
++    free(prop);
++}
++#endif /* USE_ICONS */
++
+ /*
+  * Returns the window title considering the current title format.
+  * If no format is set, this will simply return the window's name.
+diff -rupN i3-4.11-original/src/workspace.c i3-4.11-patched/src/workspace.c
+--- i3-4.11-original/src/workspace.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/workspace.c	2015-10-11 13:51:17.204958942 -0300
+@@ -59,6 +59,7 @@ Con *workspace_get(const char *num, bool
+         output = con_get_output(focused);
+         /* look for assignments */
+         struct Workspace_Assignment *assignment;
++        gaps_t gaps = (gaps_t){0, 0};
+ 
+         /* We set workspace->num to the number if this workspace’s name begins
+          * with a positive number. Otherwise it’s a named ws and num will be
+@@ -67,12 +68,21 @@ Con *workspace_get(const char *num, bool
+ 
+         TAILQ_FOREACH(assignment, &ws_assignments, ws_assignments) {
+             if (strcmp(assignment->name, num) == 0) {
+-                DLOG("Found workspace name assignment to output \"%s\"\n", assignment->output);
+-                GREP_FIRST(output, croot, !strcmp(child->name, assignment->output));
++                gaps = assignment->gaps;
++
++                if (assignment->output != NULL) {
++                    DLOG("Found workspace name assignment to output \"%s\"\n", assignment->output);
++                    GREP_FIRST(output, croot, !strcmp(child->name, assignment->output));
++                }
++
+                 break;
+             } else if (parsed_num != -1 && name_is_digits(assignment->name) && ws_name_to_number(assignment->name) == parsed_num) {
+-                DLOG("Found workspace number assignment to output \"%s\"\n", assignment->output);
+-                GREP_FIRST(output, croot, !strcmp(child->name, assignment->output));
++                gaps = assignment->gaps;
++
++                if (assignment->output != NULL) {
++                    DLOG("Found workspace number assignment to output \"%s\"\n", assignment->output);
++                    GREP_FIRST(output, croot, !strcmp(child->name, assignment->output));
++                }
+             }
+         }
+ 
+@@ -91,6 +101,7 @@ Con *workspace_get(const char *num, bool
+         workspace->workspace_layout = config.default_layout;
+         workspace->num = parsed_num;
+         LOG("num = %d\n", workspace->num);
++        workspace->gaps = gaps;
+ 
+         workspace->parent = content;
+         _workspace_apply_default_orientation(workspace);
+@@ -189,6 +200,7 @@ Con *create_workspace_on_output(Output *
+         struct Workspace_Assignment *assignment;
+         TAILQ_FOREACH(assignment, &ws_assignments, ws_assignments) {
+             if (strcmp(assignment->name, target_name) != 0 ||
++                assignment->output == NULL ||
+                 strcmp(assignment->output, output->name) == 0)
+                 continue;
+ 
+@@ -232,6 +244,15 @@ Con *create_workspace_on_output(Output *
+         }
+         sasprintf(&(ws->name), "%d", c);
+     }
++
++    struct Workspace_Assignment *assignment;
++    TAILQ_FOREACH(assignment, &ws_assignments, ws_assignments) {
++        if (strcmp(assignment->name, ws->name) == 0) {
++            ws->gaps = assignment->gaps;
++            break;
++        }
++    }
++
+     con_attach(ws, content, false);
+ 
+     sasprintf(&name, "[i3 con] workspace %s", ws->name);
+diff -rupN i3-4.11-original/src/x.c i3-4.11-patched/src/x.c
+--- i3-4.11-original/src/x.c	2015-09-30 03:55:10.000000000 -0300
++++ i3-4.11-patched/src/x.c	2015-10-11 13:51:17.204958942 -0300
+@@ -11,6 +11,9 @@
+  *
+  */
+ #include "all.h"
++#ifdef USE_ICONS
++#include <xcb/xcb_image.h>
++#endif
+ 
+ xcb_window_t ewmh_window;
+ 
+@@ -312,6 +315,44 @@ void x_window_kill(xcb_window_t window,
+     free(event);
+ }
+ 
++#ifdef USE_ICONS
++
++static inline uint32_t pixel_blend(uint32_t d, uint32_t s)
++{
++    const uint32_t a     = (s >> 24) + 1;
++
++    const uint32_t dstrb = d & 0xFF00FF;
++    const uint32_t dstg  = d & 0xFF00;
++
++    const uint32_t srcrb = s & 0xFF00FF;
++    const uint32_t srcg  = s & 0xFF00;
++
++    uint32_t drb = srcrb - dstrb;
++    uint32_t dg  =  srcg - dstg;
++
++    drb *= a;
++    dg  *= a;
++    drb >>= 8;
++    dg  >>= 8;
++
++    uint32_t rb = (drb + dstrb) & 0xFF00FF;
++    uint32_t g  = (dg  + dstg) & 0xFF00;
++
++    return rb | g;
++}
++
++/*
++ * Copy icon pixels, blend with background
++ */
++void copy_with_pixel_blend(uint32_t *dst, uint32_t* src, uint32_t background)
++{
++    int i;
++    for(i=0; i < 16*16; ++i) {
++        *dst++ = pixel_blend(background,*src++);
++    }
++}
++#endif
++
+ /*
+  * Draws the decoration of the given container onto its parent.
+  *
+@@ -543,8 +584,11 @@ void x_draw_decoration(Con *con) {
+     }
+     //DLOG("indent_level = %d, indent_mult = %d\n", indent_level, indent_mult);
+     int indent_px = (indent_level * 5) * indent_mult;
++#ifdef USE_ICONS
++    if (win->icon) indent_px += 18;
++#endif
+ 
+-    int mark_width = 0;
++     int mark_width = 0;
+     if (config.show_marks && con->mark != NULL && (con->mark)[0] != '_') {
+         char *formatted_mark;
+         sasprintf(&formatted_mark, "[%s]", con->mark);
+@@ -567,6 +611,40 @@ void x_draw_decoration(Con *con) {
+     if (win->title_format != NULL)
+         I3STRING_FREE(title);
+ 
++#ifdef USE_ICONS
++    /* Draw the icon */
++    if (win->icon) {
++        xcb_image_t* icon;
++
++        uint16_t width = 16;
++        uint16_t height = 16;
++        uint32_t icon_pixels[width*height];
++
++        copy_with_pixel_blend(icon_pixels, win->icon, p->color->background);
++
++        icon = xcb_image_create_native( conn,
++                width, height,
++                XCB_IMAGE_FORMAT_Z_PIXMAP,
++                root_depth,
++                NULL,
++                width*height*4,
++                (uint8_t*)icon_pixels
++                );
++
++        if (icon) {
++            int icon_offset_y = (con->deco_rect.height - 16) / 2;
++
++            xcb_image_put(conn, parent->pixmap, parent->pm_gc,
++                    icon, con->deco_rect.x + indent_px - 16 , con->deco_rect.y + icon_offset_y, 0);
++
++            xcb_image_destroy(icon);
++        }
++        else {
++            ELOG("Error creating XCB image\n");
++        }
++    }
++#endif
++
+ after_title:
+     /* Since we don’t clip the text at all, it might in some cases be painted
+      * on the border pixels on the right side of a window. Therefore, we draw
