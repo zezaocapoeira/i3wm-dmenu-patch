@@ -1,0 +1,8 @@
+#
+#
+## versão compativel com "dmenu-4.5"
+
+# Para a configuração do patch funcionar corretamente deve adicionar esta linha em "~/.i3/config" .
+
+
+bindsym $mod+d exec i3-dmenu-desktop --dmenu="/usr/bin/dmenu -i -l 8 -o 0.8 -fn 'Droid Sans Mono Bold-10' -x 10 -y 20 -w 300 -nb '#191919' -nf '#9ac0cd' -sb '#191919' -sf '#bf3f34' -p 'MENU➫'"
