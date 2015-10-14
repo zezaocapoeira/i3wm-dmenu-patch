@@ -1,5 +1,4 @@
 #
-#
 ## versão compativel com "dmenu-4.5"
 
 # Para a configuração do patch funcionar corretamente deve adicionar esta linha em "~/.i3/config" .
