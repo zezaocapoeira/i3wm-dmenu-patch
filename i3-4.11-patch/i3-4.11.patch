@@ -1,14 +1,13 @@
 diff -rupN i3-4.11-original/common.mk i3-4.11-patched/common.mk
 --- i3-4.11-original/common.mk	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/common.mk	2015-10-11 13:51:17.076958947 -0300
-@@ -1,6 +1,7 @@
++++ i3-4.11-patched/common.mk	2015-10-23 16:20:16.271436703 -0200
+@@ -1,5 +1,6 @@
  UNAME=$(shell uname)
  DEBUG=1
- INSTALL=install
 +USE_ICONS=1
+ INSTALL=install
  LN=ln
  PKG_CONFIG=pkg-config
- ifndef PREFIX
 @@ -59,7 +60,9 @@ I3_CPPFLAGS += -DMINOR_VERSION=${MINOR_V
  I3_CPPFLAGS += -DPATCH_VERSION=${PATCH_VERSION}
  I3_CPPFLAGS += -DSYSCONFDIR=\"${SYSCONFDIR}\"
@@ -20,20 +19,19 @@ diff -rupN i3-4.11-original/common.mk i3-4.11-patched/common.mk
  
  ## Libraries flags
  
-@@ -108,7 +111,9 @@ XCB_WM_CFLAGS += $(call cflags_for_lib,
+@@ -108,6 +111,9 @@ XCB_WM_CFLAGS += $(call cflags_for_lib,
  XCB_WM_LIBS   := $(call ldflags_for_lib, xcb-icccm,xcb-icccm)
  XCB_WM_LIBS   += $(call ldflags_for_lib, xcb-xinerama,xcb-xinerama)
  XCB_WM_LIBS   += $(call ldflags_for_lib, xcb-randr,xcb-randr)
--
 +ifeq ($(USE_ICONS),1)
 +XCB_WM_LIBS   += $(call ldflags_for_lib, xcb-image,xcb-image)
 +endif
+ 
  XKB_COMMON_CFLAGS := $(call cflags_for_lib, xkbcommon,xkbcommon)
  XKB_COMMON_LIBS := $(call ldflags_for_lib, xkbcommon,xkbcommon)
- XKB_COMMON_X11_CFLAGS := $(call cflags_for_lib, xkbcommon-x11,xkbcommon-x11)
 diff -rupN i3-4.11-original/i3bar/include/common.h i3-4.11-patched/i3bar/include/common.h
 --- i3-4.11-original/i3bar/include/common.h	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/i3bar/include/common.h	2015-10-11 13:51:17.077958947 -0300
++++ i3-4.11-patched/i3bar/include/common.h	2015-10-11 12:37:32.000000000 -0300
 @@ -38,6 +38,8 @@ struct status_block {
      i3String *short_text;
  
@@ -56,7 +54,7 @@ diff -rupN i3-4.11-original/i3bar/include/common.h i3-4.11-patched/i3bar/include
      /* The amount of pixels necessary to render a separater after the block. */
 diff -rupN i3-4.11-original/i3bar/include/config.h i3-4.11-patched/i3bar/include/config.h
 --- i3-4.11-original/i3bar/include/config.h	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/i3bar/include/config.h	2015-10-11 13:51:17.077958947 -0300
++++ i3-4.11-patched/i3bar/include/config.h	2015-10-11 12:37:32.000000000 -0300
 @@ -34,6 +34,7 @@ typedef struct config_t {
      TAILQ_HEAD(bindings_head, binding_t) bindings;
      position_t position;
@@ -67,7 +65,7 @@ diff -rupN i3-4.11-original/i3bar/include/config.h i3-4.11-patched/i3bar/include
      bool disable_ws;
 diff -rupN i3-4.11-original/i3bar/src/child.c i3-4.11-patched/i3bar/src/child.c
 --- i3-4.11-original/i3bar/src/child.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/i3bar/src/child.c	2015-10-11 13:51:17.077958947 -0300
++++ i3-4.11-patched/i3bar/src/child.c	2015-10-11 12:37:32.000000000 -0300
 @@ -75,6 +75,8 @@ static void clear_statusline(struct stat
              FREE(first->name);
              FREE(first->instance);
@@ -128,7 +126,7 @@ diff -rupN i3-4.11-original/i3bar/src/child.c i3-4.11-patched/i3bar/src/child.c
  }
 diff -rupN i3-4.11-original/i3bar/src/config.c i3-4.11-patched/i3bar/src/config.c
 --- i3-4.11-original/i3bar/src/config.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/i3bar/src/config.c	2015-10-11 13:51:17.179958943 -0300
++++ i3-4.11-patched/i3bar/src/config.c	2015-10-11 12:37:32.000000000 -0300
 @@ -288,6 +288,12 @@ static int config_integer_cb(void *param
          return 0;
      }
@@ -154,7 +152,7 @@ diff -rupN i3-4.11-original/i3bar/src/config.c i3-4.11-patched/i3bar/src/config.
      .yajl_map_key = config_map_key_cb,
 diff -rupN i3-4.11-original/i3bar/src/xcb.c i3-4.11-patched/i3bar/src/xcb.c
 --- i3-4.11-original/i3bar/src/xcb.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/i3bar/src/xcb.c	2015-10-11 13:51:17.180958943 -0300
++++ i3-4.11-patched/i3bar/src/xcb.c	2015-10-11 12:37:32.000000000 -0300
 @@ -63,7 +63,7 @@ static i3Font font;
  /* Icon size (based on font size) */
  int icon_size;
@@ -335,7 +333,7 @@ diff -rupN i3-4.11-original/i3bar/src/xcb.c i3-4.11-patched/i3bar/src/xcb.c
              workspace_width += 2 * logical_px(ws_hoff_px) + 2 * logical_px(1) + binding.width;
 diff -rupN i3-4.11-original/include/atoms.xmacro i3-4.11-patched/include/atoms.xmacro
 --- i3-4.11-original/include/atoms.xmacro	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/include/atoms.xmacro	2015-10-11 13:51:17.180958943 -0300
++++ i3-4.11-patched/include/atoms.xmacro	2015-10-23 16:20:16.271436703 -0200
 @@ -32,6 +32,7 @@ xmacro(_NET_ACTIVE_WINDOW)
  xmacro(_NET_CLOSE_WINDOW)
  xmacro(_NET_STARTUP_ID)
@@ -346,7 +344,7 @@ diff -rupN i3-4.11-original/include/atoms.xmacro i3-4.11-patched/include/atoms.x
  xmacro(UTF8_STRING)
 diff -rupN i3-4.11-original/include/commands.h i3-4.11-patched/include/commands.h
 --- i3-4.11-original/include/commands.h	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/include/commands.h	2015-10-11 13:51:17.180958943 -0300
++++ i3-4.11-patched/include/commands.h	2015-10-11 12:37:32.000000000 -0300
 @@ -317,3 +317,9 @@ void cmd_shmlog(I3_CMD, char *argument);
   *
   */
@@ -359,7 +357,7 @@ diff -rupN i3-4.11-original/include/commands.h i3-4.11-patched/include/commands.
 +void cmd_gaps(I3_CMD, char *type, char *scope, char *mode, char *value);
 diff -rupN i3-4.11-original/include/con.h i3-4.11-patched/include/con.h
 --- i3-4.11-original/include/con.h	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/include/con.h	2015-10-11 13:51:17.181958943 -0300
++++ i3-4.11-patched/include/con.h	2015-10-11 12:37:32.000000000 -0300
 @@ -181,6 +181,13 @@ Con *con_for_window(Con *con, i3Window *
  int con_num_children(Con *con);
  
@@ -397,7 +395,7 @@ diff -rupN i3-4.11-original/include/con.h i3-4.11-patched/include/con.h
 +bool con_has_parent(Con *parent, Con *child);
 diff -rupN i3-4.11-original/include/config.h i3-4.11-patched/include/config.h
 --- i3-4.11-original/include/config.h	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/include/config.h	2015-10-11 13:51:17.181958943 -0300
++++ i3-4.11-patched/include/config.h	2015-10-11 12:37:32.000000000 -0300
 @@ -229,6 +229,15 @@ struct Config {
  
      /* The number of currently parsed barconfigs */
@@ -426,7 +424,7 @@ diff -rupN i3-4.11-original/include/config.h i3-4.11-patched/include/config.h
          char *statusline;
 diff -rupN i3-4.11-original/include/config_directives.h i3-4.11-patched/include/config_directives.h
 --- i3-4.11-original/include/config_directives.h	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/include/config_directives.h	2015-10-11 13:51:17.181958943 -0300
++++ i3-4.11-patched/include/config_directives.h	2015-10-11 12:37:32.000000000 -0300
 @@ -40,6 +40,9 @@ CFGFUN(criteria_pop_state);
  CFGFUN(font, const char *font);
  CFGFUN(exec, const char *exectype, const char *no_startup_id, const char *command);
@@ -447,7 +445,7 @@ diff -rupN i3-4.11-original/include/config_directives.h i3-4.11-patched/include/
  CFGFUN(bar_wheel_down_cmd, const char *command);
 diff -rupN i3-4.11-original/include/data.h i3-4.11-patched/include/data.h
 --- i3-4.11-original/include/data.h	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/include/data.h	2015-10-11 13:51:17.182958943 -0300
++++ i3-4.11-patched/include/data.h	2015-10-23 16:20:16.271436703 -0200
 @@ -46,6 +46,7 @@ typedef struct Con Con;
  typedef struct Match Match;
  typedef struct Assignment Assignment;
@@ -493,20 +491,19 @@ diff -rupN i3-4.11-original/include/data.h i3-4.11-patched/include/data.h
  
      TAILQ_ENTRY(Workspace_Assignment) ws_assignments;
  };
-@@ -410,6 +420,12 @@ struct Window {
-     /** Depth of the window */
-     uint16_t depth;
+@@ -421,6 +431,11 @@ struct Window {
  
+     /* aspect ratio from WM_NORMAL_HINTS (MPlayer uses this for example) */
+     double aspect_ratio;
++
 +#ifdef USE_ICONS
 +    /** Window icon, array of size 16x16 containing the ARGB pixels */
 +    uint32_t* icon;
 +#endif
-+
-+
-     /* the wanted size of the window, used in combination with size
-      * increments (see below). */
-     int base_width;
-@@ -560,6 +576,9 @@ struct Con {
+ };
+ 
+ /**
+@@ -560,6 +575,9 @@ struct Con {
       * workspace is not a named workspace (for named workspaces, num == -1) */
      int num;
  
@@ -518,7 +515,7 @@ diff -rupN i3-4.11-original/include/data.h i3-4.11-patched/include/data.h
      struct Rect rect;
 diff -rupN i3-4.11-original/include/render.h i3-4.11-patched/include/render.h
 --- i3-4.11-original/include/render.h	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/include/render.h	2015-10-11 13:51:17.198958942 -0300
++++ i3-4.11-patched/include/render.h	2015-10-11 12:37:32.000000000 -0300
 @@ -18,7 +18,7 @@
   * updated in X11.
   *
@@ -530,10 +527,10 @@ diff -rupN i3-4.11-original/include/render.h i3-4.11-patched/include/render.h
   * Returns the height for the decorations
 diff -rupN i3-4.11-original/include/window.h i3-4.11-patched/include/window.h
 --- i3-4.11-original/include/window.h	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/include/window.h	2015-10-11 13:51:17.198958942 -0300
-@@ -82,6 +82,15 @@ void window_update_hints(i3Window *win,
++++ i3-4.11-patched/include/window.h	2015-10-23 16:20:16.272436703 -0200
+@@ -68,6 +68,14 @@ void window_update_type(i3Window *window
   */
- void window_update_motif_hints(i3Window *win, xcb_get_property_reply_t *prop, border_style_t *motif_border_style);
+ void window_update_hints(i3Window *win, xcb_get_property_reply_t *prop, bool *urgency_hint);
  
 +#ifdef USE_ICONS
 +/**
@@ -541,15 +538,14 @@ diff -rupN i3-4.11-original/include/window.h i3-4.11-patched/include/window.h
 + *
 + */
 +void window_update_icon(i3Window *win, xcb_get_property_reply_t *prop);
-+
 +#endif
 +
  /**
-  * Returns the window title considering the current title format.
-  * If no format is set, this will simply return the window's name.
+  * Updates the MOTIF_WM_HINTS. The container's border style should be set to
+  * `motif_border_style' if border style is not BS_NORMAL.
 diff -rupN i3-4.11-original/parser-specs/commands.spec i3-4.11-patched/parser-specs/commands.spec
 --- i3-4.11-original/parser-specs/commands.spec	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/parser-specs/commands.spec	2015-10-11 13:51:17.198958942 -0300
++++ i3-4.11-patched/parser-specs/commands.spec	2015-10-11 12:37:32.000000000 -0300
 @@ -41,6 +41,7 @@ state INITIAL:
    'title_format' -> TITLE_FORMAT
    'mode' -> MODE
@@ -584,7 +580,7 @@ diff -rupN i3-4.11-original/parser-specs/commands.spec i3-4.11-patched/parser-sp
      -> call cmd_border($border_style, "2")
 diff -rupN i3-4.11-original/parser-specs/config.spec i3-4.11-patched/parser-specs/config.spec
 --- i3-4.11-original/parser-specs/config.spec	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/parser-specs/config.spec	2015-10-11 13:51:17.198958942 -0300
++++ i3-4.11-patched/parser-specs/config.spec	2015-10-11 12:37:32.000000000 -0300
 @@ -22,6 +22,9 @@ state INITIAL:
    'bar'                                    -> BARBRACE
    'font'                                   -> FONT
@@ -664,7 +660,7 @@ diff -rupN i3-4.11-original/parser-specs/config.spec i3-4.11-patched/parser-spec
        ->
 diff -rupN i3-4.11-original/src/commands.c i3-4.11-patched/src/commands.c
 --- i3-4.11-original/src/commands.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/commands.c	2015-10-11 13:51:17.199958942 -0300
++++ i3-4.11-patched/src/commands.c	2015-10-11 12:37:32.000000000 -0300
 @@ -967,7 +967,7 @@ void cmd_append_layout(I3_CMD, char *pat
      // is not executed yet and will be batched with append_layout’s
      // needs_tree_render after the parser finished. We should check if that is
@@ -742,7 +738,7 @@ diff -rupN i3-4.11-original/src/commands.c i3-4.11-patched/src/commands.c
 +}
 diff -rupN i3-4.11-original/src/con.c i3-4.11-patched/src/con.c
 --- i3-4.11-original/src/con.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/con.c	2015-10-11 13:51:17.200958942 -0300
++++ i3-4.11-patched/src/con.c	2015-10-11 12:37:32.000000000 -0300
 @@ -646,6 +646,32 @@ int con_num_children(Con *con) {
      return children;
  }
@@ -829,7 +825,7 @@ diff -rupN i3-4.11-original/src/con.c i3-4.11-patched/src/con.c
 +}
 diff -rupN i3-4.11-original/src/config.c i3-4.11-patched/src/config.c
 --- i3-4.11-original/src/config.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/config.c	2015-10-11 13:51:17.200958942 -0300
++++ i3-4.11-patched/src/config.c	2015-10-11 12:37:32.000000000 -0300
 @@ -202,6 +202,9 @@ void load_configuration(xcb_connection_t
      /* Set default_orientation to NO_ORIENTATION for auto orientation. */
      config.default_orientation = NO_ORIENTATION;
@@ -842,7 +838,7 @@ diff -rupN i3-4.11-original/src/config.c i3-4.11-patched/src/config.c
          config.workspace_urgency_timer = 0.5;
 diff -rupN i3-4.11-original/src/config_directives.c i3-4.11-patched/src/config_directives.c
 --- i3-4.11-original/src/config_directives.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/config_directives.c	2015-10-11 13:51:17.200958942 -0300
++++ i3-4.11-patched/src/config_directives.c	2015-10-11 12:37:32.000000000 -0300
 @@ -257,6 +257,59 @@ CFGFUN(for_window, const char *command)
      TAILQ_INSERT_TAIL(&assignments, assignment, assignments);
  }
@@ -928,7 +924,7 @@ diff -rupN i3-4.11-original/src/config_directives.c i3-4.11-patched/src/config_d
          current_bar.modifier = M_MOD1;
 diff -rupN i3-4.11-original/src/floating.c i3-4.11-patched/src/floating.c
 --- i3-4.11-original/src/floating.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/floating.c	2015-10-11 13:51:17.201958942 -0300
++++ i3-4.11-patched/src/floating.c	2015-10-11 12:37:32.000000000 -0300
 @@ -291,8 +291,8 @@ void floating_enable(Con *con, bool auto
      TAILQ_INSERT_TAIL(&(nc->focus_head), con, focused);
  
@@ -951,7 +947,7 @@ diff -rupN i3-4.11-original/src/floating.c i3-4.11-patched/src/floating.c
  
 diff -rupN i3-4.11-original/src/ipc.c i3-4.11-patched/src/ipc.c
 --- i3-4.11-original/src/ipc.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/ipc.c	2015-10-11 13:51:17.201958942 -0300
++++ i3-4.11-patched/src/ipc.c	2015-10-11 12:37:32.000000000 -0300
 @@ -121,6 +121,16 @@ static void dump_rect(yajl_gen gen, cons
      y(map_close);
  }
@@ -992,7 +988,7 @@ diff -rupN i3-4.11-original/src/ipc.c i3-4.11-patched/src/ipc.c
          ystr(config->separator_symbol);
 diff -rupN i3-4.11-original/src/load_layout.c i3-4.11-patched/src/load_layout.c
 --- i3-4.11-original/src/load_layout.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/load_layout.c	2015-10-11 13:51:17.201958942 -0300
++++ i3-4.11-patched/src/load_layout.c	2015-10-11 12:37:32.000000000 -0300
 @@ -22,6 +22,7 @@
  static char *last_key;
  static Con *json_node;
@@ -1060,7 +1056,7 @@ diff -rupN i3-4.11-original/src/load_layout.c i3-4.11-patched/src/load_layout.c
      parsing_deco_rect = false;
 diff -rupN i3-4.11-original/src/manage.c i3-4.11-patched/src/manage.c
 --- i3-4.11-original/src/manage.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/manage.c	2015-10-11 13:51:17.202958942 -0300
++++ i3-4.11-patched/src/manage.c	2015-10-23 16:20:16.272436703 -0200
 @@ -92,6 +92,10 @@ void manage_window(xcb_window_t window,
          role_cookie, startup_id_cookie, wm_hints_cookie,
          wm_normal_hints_cookie, motif_wm_hints_cookie;
@@ -1072,27 +1068,29 @@ diff -rupN i3-4.11-original/src/manage.c i3-4.11-patched/src/manage.c
      geomc = xcb_get_geometry(conn, d);
  
      /* Check if the window is mapped (it could be not mapped when intializing and
-@@ -161,6 +165,9 @@ void manage_window(xcb_window_t window,
-     wm_hints_cookie = xcb_icccm_get_wm_hints(conn, window);
+@@ -162,6 +166,10 @@ void manage_window(xcb_window_t window,
      wm_normal_hints_cookie = xcb_icccm_get_wm_normal_hints(conn, window);
      motif_wm_hints_cookie = GET_PROPERTY(A__MOTIF_WM_HINTS, 5 * sizeof(uint64_t));
+ 
 +#ifdef USE_ICONS
 +    wm_icon_cookie = xcb_get_property_unchecked(conn, false, window, A__NET_WM_ICON, XCB_ATOM_CARDINAL, 0, UINT32_MAX);
 +#endif
- 
++
      DLOG("Managing window 0x%08x\n", window);
  
-@@ -187,6 +194,9 @@ void manage_window(xcb_window_t window,
+     i3Window *cwindow = scalloc(1, sizeof(i3Window));
+@@ -187,6 +195,10 @@ void manage_window(xcb_window_t window,
      window_update_hints(cwindow, xcb_get_property_reply(conn, wm_hints_cookie, NULL), &urgency_hint);
      border_style_t motif_border_style = BS_NORMAL;
      window_update_motif_hints(cwindow, xcb_get_property_reply(conn, motif_wm_hints_cookie, NULL), &motif_border_style);
 +#ifdef USE_ICONS
 +    window_update_icon(cwindow, xcb_get_property_reply(conn, wm_icon_cookie, NULL));
 +#endif
++
      xcb_size_hints_t wm_size_hints;
      if (!xcb_icccm_get_wm_size_hints_reply(conn, wm_normal_hints_cookie, &wm_size_hints, NULL))
          memset(&wm_size_hints, '\0', sizeof(xcb_size_hints_t));
-@@ -513,13 +523,13 @@ void manage_window(xcb_window_t window,
+@@ -513,13 +525,13 @@ void manage_window(xcb_window_t window,
           * workspace at all. However, just calling render_con() on the
           * workspace isn’t enough either — it needs the rect. */
          ws->rect = ws->parent->rect;
@@ -1110,7 +1108,7 @@ diff -rupN i3-4.11-original/src/manage.c i3-4.11-patched/src/manage.c
      ipc_send_window_event("new", nc);
 diff -rupN i3-4.11-original/src/randr.c i3-4.11-patched/src/randr.c
 --- i3-4.11-original/src/randr.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/randr.c	2015-10-11 13:51:17.202958942 -0300
++++ i3-4.11-patched/src/randr.c	2015-10-11 12:37:32.000000000 -0300
 @@ -365,7 +365,7 @@ void init_ws_for_output(Output *output,
      /* go through all assignments and move the existing workspaces to this output */
      struct Workspace_Assignment *assignment;
@@ -1140,7 +1138,7 @@ diff -rupN i3-4.11-original/src/randr.c i3-4.11-patched/src/randr.c
          LOG("Initializing first assigned workspace \"%s\" for output \"%s\"\n",
 diff -rupN i3-4.11-original/src/render.c i3-4.11-patched/src/render.c
 --- i3-4.11-original/src/render.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/render.c	2015-10-11 13:51:17.203958942 -0300
++++ i3-4.11-patched/src/render.c	2015-10-23 16:20:16.272436703 -0200
 @@ -20,10 +20,7 @@ static bool show_debug_borders = false;
   * Returns the height for the decorations
   */
@@ -1272,7 +1270,7 @@ diff -rupN i3-4.11-original/src/render.c i3-4.11-patched/src/render.c
 +#ifdef USE_ICONS
 +    /* minimum decoration height to allow icon to fit
 +     * not actuuly required, icon would be cropped otherwise */
-+    deco_height = deco_height<12 ? 12 : deco_height;
++    deco_height = deco_height<16 ? 16 : deco_height;
 +#endif
  
      /* precalculate the sizes to be able to correct rounding errors */
@@ -1315,7 +1313,7 @@ diff -rupN i3-4.11-original/src/render.c i3-4.11-patched/src/render.c
              if (children != 1)
 diff -rupN i3-4.11-original/src/tree.c i3-4.11-patched/src/tree.c
 --- i3-4.11-original/src/tree.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/tree.c	2015-10-11 13:51:17.203958942 -0300
++++ i3-4.11-patched/src/tree.c	2015-10-23 16:20:16.273436703 -0200
 @@ -268,6 +268,9 @@ bool tree_close(Con *con, kill_window_t
          FREE(con->window->class_class);
          FREE(con->window->class_instance);
@@ -1337,11 +1335,12 @@ diff -rupN i3-4.11-original/src/tree.c i3-4.11-patched/src/tree.c
      DLOG("-- END RENDERING --\n");
 diff -rupN i3-4.11-original/src/window.c i3-4.11-patched/src/window.c
 --- i3-4.11-original/src/window.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/window.c	2015-10-11 13:51:17.203958942 -0300
-@@ -334,6 +334,87 @@ void window_update_motif_hints(i3Window
- #undef MWM_DECOR_TITLE
++++ i3-4.11-patched/src/window.c	2015-10-23 16:20:16.273436703 -0200
+@@ -406,3 +406,84 @@ i3String *window_parse_title_format(i3Wi
+     i3string_set_markup(formatted, is_markup);
+     return formatted;
  }
- 
++
 +
 +#ifdef USE_ICONS
 +/*
@@ -1377,7 +1376,7 @@ diff -rupN i3-4.11-original/src/window.c i3-4.11-patched/src/window.c
 +    uint64_t len = 0;
 +
 +    if(!prop || prop->type != XCB_ATOM_CARDINAL || prop->format != 32) {
-+            DLOG("_NET_WM_ICON is not set\n");
++        DLOG("_NET_WM_ICON is not set\n");
 +        FREE(prop);
 +        return;
 +    }
@@ -1422,13 +1421,9 @@ diff -rupN i3-4.11-original/src/window.c i3-4.11-patched/src/window.c
 +    free(prop);
 +}
 +#endif /* USE_ICONS */
-+
- /*
-  * Returns the window title considering the current title format.
-  * If no format is set, this will simply return the window's name.
 diff -rupN i3-4.11-original/src/workspace.c i3-4.11-patched/src/workspace.c
 --- i3-4.11-original/src/workspace.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/workspace.c	2015-10-11 13:51:17.204958942 -0300
++++ i3-4.11-patched/src/workspace.c	2015-10-11 12:37:32.000000000 -0300
 @@ -59,6 +59,7 @@ Con *workspace_get(const char *num, bool
          output = con_get_output(focused);
          /* look for assignments */
@@ -1497,7 +1492,7 @@ diff -rupN i3-4.11-original/src/workspace.c i3-4.11-patched/src/workspace.c
      sasprintf(&name, "[i3 con] workspace %s", ws->name);
 diff -rupN i3-4.11-original/src/x.c i3-4.11-patched/src/x.c
 --- i3-4.11-original/src/x.c	2015-09-30 03:55:10.000000000 -0300
-+++ i3-4.11-patched/src/x.c	2015-10-11 13:51:17.204958942 -0300
++++ i3-4.11-patched/src/x.c	2015-10-23 16:20:16.274436703 -0200
 @@ -11,6 +11,9 @@
   *
   */
@@ -1508,7 +1503,7 @@ diff -rupN i3-4.11-original/src/x.c i3-4.11-patched/src/x.c
  
  xcb_window_t ewmh_window;
  
-@@ -312,6 +315,44 @@ void x_window_kill(xcb_window_t window,
+@@ -312,6 +315,45 @@ void x_window_kill(xcb_window_t window,
      free(event);
  }
  
@@ -1545,28 +1540,27 @@ diff -rupN i3-4.11-original/src/x.c i3-4.11-patched/src/x.c
 +{
 +    int i;
 +    for(i=0; i < 16*16; ++i) {
-+        *dst++ = pixel_blend(background,*src++);
++    *dst++ = pixel_blend(background,*src++);
 +    }
 +}
 +#endif
 +
++
  /*
   * Draws the decoration of the given container onto its parent.
   *
-@@ -543,8 +584,11 @@ void x_draw_decoration(Con *con) {
+@@ -543,6 +585,10 @@ void x_draw_decoration(Con *con) {
      }
      //DLOG("indent_level = %d, indent_mult = %d\n", indent_level, indent_mult);
      int indent_px = (indent_level * 5) * indent_mult;
 +#ifdef USE_ICONS
 +    if (win->icon) indent_px += 18;
 +#endif
++
  
--    int mark_width = 0;
-+     int mark_width = 0;
+     int mark_width = 0;
      if (config.show_marks && con->mark != NULL && (con->mark)[0] != '_') {
-         char *formatted_mark;
-         sasprintf(&formatted_mark, "[%s]", con->mark);
-@@ -567,6 +611,40 @@ void x_draw_decoration(Con *con) {
+@@ -567,6 +613,40 @@ void x_draw_decoration(Con *con) {
      if (win->title_format != NULL)
          I3STRING_FREE(title);
  
